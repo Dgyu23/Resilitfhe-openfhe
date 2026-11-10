@@ -30,6 +30,9 @@
 //==================================================================================
 
 #include "binfhe-base-scheme.h"
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+#include "pbs-operator-breakdown.h"
+#endif
 
 #include <string>
 
@@ -189,6 +192,9 @@ LWECiphertext BinFHEScheme::EvalBinGate(const std::shared_ptr<BinFHECryptoParams
 // Full evaluation as described in https://eprint.iacr.org/2020/086
 LWECiphertext BinFHEScheme::Bootstrap(const std::shared_ptr<BinFHECryptoParams>& params, const RingGSWBTKey& EK,
                                       ConstLWECiphertext& ct, bool extended) const {
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    ScopedPBSOperatorBreakdownTimer totalTimer(PBSOperatorBreakdownStage::TOTAL);
+#endif
     if (params == nullptr)
         OPENFHE_THROW("BinFHECryptoParams is empty");
     if (ct == nullptr)
@@ -204,8 +210,19 @@ LWECiphertext BinFHEScheme::Bootstrap(const std::shared_ptr<BinFHECryptoParams>&
     // we can transpose "a" to get an encryption under the original secret key
     auto accVec{BootstrapGateCore(params, AND, EK.BSkey, cct)->GetElements()};
     accVec[0] = accVec[0].Transpose();
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        accVec[0].SetFormat(Format::COEFFICIENT);
+    }
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        accVec[1].SetFormat(Format::COEFFICIENT);
+    }
+#else
     accVec[0].SetFormat(Format::COEFFICIENT);
     accVec[1].SetFormat(Format::COEFFICIENT);
+#endif
 
     NativeInteger b{Q / (ct->GetptModulus() * 2) + 1};
     b.ModAddFastEq(accVec[1][0], Q);
@@ -572,7 +589,14 @@ RLWECiphertext BinFHEScheme::BootstrapGateCore(const std::shared_ptr<BinFHECrypt
     res[0] = NativePoly(polyParams, Format::EVALUATION, true);
     res[1] = NativePoly(polyParams, Format::COEFFICIENT, false);
     res[1].SetValues(std::move(m), Format::COEFFICIENT);
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer nttTimer(PBSOperatorBreakdownStage::NTT);
+        res[1].SetFormat(Format::EVALUATION);
+    }
+#else
     res[1].SetFormat(Format::EVALUATION);
+#endif
 
     // main accumulation computation
     // the following loop is the bottleneck of bootstrapping/binary gate
@@ -615,7 +639,14 @@ RLWECiphertext BinFHEScheme::BootstrapFuncCore(const std::shared_ptr<BinFHECrypt
     res[0] = NativePoly(polyParams, Format::EVALUATION, true);
     res[1] = NativePoly(polyParams, Format::COEFFICIENT, false);
     res[1].SetValues(std::move(m), Format::COEFFICIENT);
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer nttTimer(PBSOperatorBreakdownStage::NTT);
+        res[1].SetFormat(Format::EVALUATION);
+    }
+#else
     res[1].SetFormat(Format::EVALUATION);
+#endif
 
     // main accumulation computation
     // the following loop is the bottleneck of bootstrapping/binary gate
@@ -629,12 +660,26 @@ RLWECiphertext BinFHEScheme::BootstrapFuncCore(const std::shared_ptr<BinFHECrypt
 template <typename Func>
 LWECiphertext BinFHEScheme::BootstrapFunc(const std::shared_ptr<BinFHECryptoParams>& params, const RingGSWBTKey& EK,
                                           ConstLWECiphertext& ct, const Func f, const NativeInteger& fmod) const {
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    ScopedPBSOperatorBreakdownTimer totalTimer(PBSOperatorBreakdownStage::TOTAL);
+#endif
     // the accumulator result is encrypted w.r.t. the transposed secret key
     // we can transpose "a" to get an encryption under the original secret key
     auto accVec{BootstrapFuncCore(params, EK.BSkey, ct, f, fmod)->GetElements()};
     accVec[0] = accVec[0].Transpose();
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        accVec[0].SetFormat(Format::COEFFICIENT);
+    }
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        accVec[1].SetFormat(Format::COEFFICIENT);
+    }
+#else
     accVec[0].SetFormat(Format::COEFFICIENT);
     accVec[1].SetFormat(Format::COEFFICIENT);
+#endif
 
     auto ctExt = std::make_shared<LWECiphertextImpl>(std::move(accVec[0].GetValues()), accVec[1][0]);
 

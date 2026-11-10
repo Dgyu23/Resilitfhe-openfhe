@@ -4,6 +4,9 @@
 
 # all files named *.cpp are compiled to form the library
 file(GLOB BINFHE_SRC_FILES CONFIGURE_DEPENDS lib/*.cpp)
+if(NOT WITH_PBS_OPERATOR_BREAKDOWN)
+    list(REMOVE_ITEM BINFHE_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/pbs-operator-breakdown.cpp")
+endif()
 
 include_directories(${CORE_INCLUDE_DIRS})
 list(APPEND BINFHE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -17,6 +20,9 @@ set(BINFHE_VERSION ${BINFHE_VERSION_MAJOR}.${BINFHE_VERSION_MINOR}.${BINFHE_VERS
 
 add_library(binfheobj OBJECT ${BINFHE_SRC_FILES})
 set_property(TARGET binfheobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+if(WITH_PBS_OPERATOR_BREAKDOWN)
+    target_compile_definitions(binfheobj PRIVATE WITH_PBS_OPERATOR_BREAKDOWN)
+endif()
 
 if(BUILD_SHARED)
     add_dependencies(binfheobj OPENFHEcore)
@@ -69,6 +75,10 @@ endif()
 set(BINFHEAPPS "")
 if(BUILD_EXAMPLES)
     file(GLOB BINFHE_EXAMPLES_SRC_FILES CONFIGURE_DEPENDS examples/*.cpp)
+    if(NOT WITH_PBS_OPERATOR_BREAKDOWN)
+        list(REMOVE_ITEM BINFHE_EXAMPLES_SRC_FILES
+             "${CMAKE_CURRENT_SOURCE_DIR}/examples/evaluation-pbs-operator-breakdown.cpp")
+    endif()
     foreach(app ${BINFHE_EXAMPLES_SRC_FILES})
         get_filename_component(exe ${app} NAME_WE)
         add_executable(${exe} ${app})

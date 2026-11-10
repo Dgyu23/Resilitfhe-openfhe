@@ -65,7 +65,7 @@ else()
     option(BUILD_UNITTESTS "Set to ON to build unit tests for the library"             ON  )
     option(BUILD_EXAMPLES "Set to ON to build examples for the library"                ON  )
     option(BUILD_BENCHMARKS "Set to ON to build benchmarks for the library"            ON  )
-    option(WITH_OPENMP "Use OpenMP to enable <omp.h>"                                  ON  )
+    option(WITH_OPENMP "Use OpenMP to enable <omp.h>"                                  OFF  )
 endif()
 
 option(BUILD_EXTRAS "Set to ON to build extras for the library"                        OFF )
@@ -78,6 +78,7 @@ option(WITH_NATIVEOPT "Use machine-specific optimizations"                      
 option(WITH_COVTEST "Turn on to enable coverage testing"                               OFF )
 option(WITH_NOISE_DEBUG "Use only when running lattice estimator; not for production"  OFF )
 option(WITH_REDUCED_NOISE "Enable reduced noise within HKS and BFV HPSPOVERQ modes"    OFF )
+option(WITH_PBS_OPERATOR_BREAKDOWN "Enable BinFHE PBS operator breakdown instrumentation" OFF )
 option(USE_MACPORTS "Use MacPorts installed packages"                                  OFF )
 
 # Set required number of bits for native integer in build by setting NATIVE_SIZE to 64 or 128
@@ -108,6 +109,7 @@ message(STATUS "WITH_NATIVEOPT:     ${WITH_NATIVEOPT}")
 message(STATUS "WITH_COVTEST:       ${WITH_COVTEST}")
 message(STATUS "WITH_NOISE_DEBUG:   ${WITH_NOISE_DEBUG}")
 message(STATUS "WITH_REDUCED_NOISE: ${WITH_REDUCED_NOISE}")
+message(STATUS "WITH_PBS_OPERATOR_BREAKDOWN: ${WITH_PBS_OPERATOR_BREAKDOWN}")
 message(STATUS "USE_MACPORTS:       ${USE_MACPORTS}")
 
 #--------------------------------------------------------------------

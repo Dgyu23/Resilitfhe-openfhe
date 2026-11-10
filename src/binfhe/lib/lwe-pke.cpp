@@ -30,6 +30,9 @@
 //==================================================================================
 
 #include "lwe-pke.h"
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+#include "pbs-operator-breakdown.h"
+#endif
 
 #include "math/binaryuniformgenerator.h"
 #include "math/discreteuniformgenerator.h"
@@ -347,6 +350,9 @@ LWESwitchingKey LWEEncryptionScheme::KeySwitchGen(const std::shared_ptr<LWECrypt
 // https://eprint.iacr.org/2014/816
 LWECiphertext LWEEncryptionScheme::KeySwitch(const std::shared_ptr<LWECryptoParams>& params, ConstLWESwitchingKey& K,
                                              ConstLWECiphertext& ctQN) const {
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    ScopedPBSOperatorBreakdownTimer keySwitchTimer(PBSOperatorBreakdownStage::KEYSWITCH);
+#endif
     const size_t n(params->Getn());
     const size_t N(params->GetN());
     NativeInteger Q(params->GetqKS());

@@ -30,6 +30,9 @@
 //==================================================================================
 
 #include "rgsw-acc-cggi.h"
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+#include "pbs-operator-breakdown.h"
+#endif
 
 #include <string>
 
@@ -102,18 +105,43 @@ RingGSWEvalKey RingGSWAccumulatorCGGI::KeyGenCGGI(const std::shared_ptr<RingGSWC
 void RingGSWAccumulatorCGGI::AddToAccCGGI(const std::shared_ptr<RingGSWCryptoParams>& params, ConstRingGSWEvalKey& ek1,
                                           ConstRingGSWEvalKey& ek2, const NativeInteger& a, RLWECiphertext& acc) const {
     std::vector<NativePoly> ct(acc->GetElements());
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        ct[0].SetFormat(Format::COEFFICIENT);
+    }
+    {
+        ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
+        ct[1].SetFormat(Format::COEFFICIENT);
+    }
+#else
     ct[0].SetFormat(Format::COEFFICIENT);
     ct[1].SetFormat(Format::COEFFICIENT);
+#endif
 
     // approximate gadget decomposition is used; the first digit is ignored
     uint32_t digitsG2{(params->GetDigitsG() - 1) << 1};
     std::vector<NativePoly> dct(digitsG2, NativePoly(params->GetPolyParams(), Format::COEFFICIENT, true));
 
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    {
+        ScopedPBSOperatorBreakdownTimer decomposeTimer(PBSOperatorBreakdownStage::DECOMPOSE);
+        SignedDigitDecompose(params, ct, dct);
+    }
+#else
     SignedDigitDecompose(params, ct, dct);
+#endif
 
 #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(digitsG2))
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    for (uint32_t i = 0; i < digitsG2; ++i) {
+        ScopedPBSOperatorBreakdownTimer nttTimer(PBSOperatorBreakdownStage::NTT);
+        dct[i].SetFormat(Format::EVALUATION);
+    }
+#else
     for (uint32_t i = 0; i < digitsG2; ++i)
         dct[i].SetFormat(Format::EVALUATION);
+#endif
 
     // obtain both monomial(index) for sk = 1 and monomial(-index) for sk = -1
     // index is in range [0,m] - so we need to adjust the edge case when index == m to index = 0
@@ -130,6 +158,9 @@ void RingGSWAccumulatorCGGI::AddToAccCGGI(const std::shared_ptr<RingGSWCryptoPar
     // TODO (dsuponit): benchmark cases with operator*() and operator*=(). Make a copy of dct?
 
     const std::vector<std::vector<NativePoly>>& ev1(ek1->GetElements());
+#if defined(WITH_PBS_OPERATOR_BREAKDOWN)
+    ScopedPBSOperatorBreakdownTimer vcmmTimer(PBSOperatorBreakdownStage::VCMM);
+#endif
     NativePoly tmp(dct[0] * ev1[0][0]);
     for (uint32_t i = 1; i < digitsG2; ++i)
         tmp += (dct[i] * ev1[i][0]);
