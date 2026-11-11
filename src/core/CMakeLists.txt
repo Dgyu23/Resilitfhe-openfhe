@@ -4,6 +4,9 @@
 
 # all files named *.c or */cpp are compiled to form the library
 file(GLOB_RECURSE CORE_SRC_FILES CONFIGURE_DEPENDS lib/*.c lib/*.cpp lib/utils/*.cpp)
+if(NOT WITH_PBS_SBF_FAULT_INJECTION)
+    list(REMOVE_ITEM CORE_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/utils/pbs-sbf-fault-injection.cpp")
+endif()
 
 list(APPEND CORE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include")
 list(APPEND CORE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
@@ -16,6 +19,9 @@ set(CORE_VERSION_PATCH ${OPENFHE_VERSION_PATCH})
 set(CORE_VERSION ${CORE_VERSION_MAJOR}.${CORE_VERSION_MINOR}.${CORE_VERSION_PATCH})
 
 add_library(coreobj OBJECT ${CORE_SRC_FILES})
+if(WITH_PBS_SBF_FAULT_INJECTION)
+    target_compile_definitions(coreobj PRIVATE WITH_PBS_SBF_FAULT_INJECTION)
+endif()
 add_dependencies(coreobj third-party)
 
 set_property(TARGET coreobj PROPERTY POSITION_INDEPENDENT_CODE 1)

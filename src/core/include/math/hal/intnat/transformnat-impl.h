@@ -39,6 +39,9 @@
 #include "math/hal/basicint.h"
 #include "math/hal/intnat/ubintnat.h"
 #include "math/hal/intnat/mubintvecnat.h"
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+#include "utils/pbs-sbf-fault-injection.h"
+#endif
 #include "math/hal/intnat/transformnat.h"
 #include "math/nbtheory.h"
 
@@ -198,6 +201,9 @@ void NumberTheoreticTransformNat<VecType>::InverseTransformIterative(const VecTy
 template <typename VecType>
 void NumberTheoreticTransformNat<VecType>::ForwardTransformToBitReverseInPlace(const VecType& rootOfUnityTable,
                                                                                VecType* element) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    ScopedPBSFaultTransform transformScope(PBSFaultTransform::NTT);
+#endif
     usint n         = element->GetLength();
     IntType modulus = element->GetModulus();
     IntType mu      = modulus.ComputeMu();
@@ -302,6 +308,10 @@ template <typename VecType>
 void NumberTheoreticTransformNat<VecType>::ForwardTransformToBitReverseInPlace(const VecType& rootOfUnityTable,
                                                                                const VecType& preconRootOfUnityTable,
                                                                                VecType* element) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    ScopedPBSFaultTransform transformScope(PBSFaultTransform::NTT);
+    ScopedPBSFaultInjection faultScope(PBSFaultTransform::NTT);
+#endif
     //
     // NTT based on the Cooley-Tukey (CT) butterfly
     // Inputs: element (vector of size n in standard ordering)
@@ -320,21 +330,47 @@ void NumberTheoreticTransformNat<VecType>::ForwardTransformToBitReverseInPlace(c
 
     const auto modulus{element->GetModulus()};
     const uint32_t n(element->GetLength() >> 1);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    const auto butterflyCount = static_cast<uint64_t>(n) * GetMSB(element->GetLength());
+    const auto dimensions = std::array<uint32_t, 4>{static_cast<uint32_t>(element->GetLength()), 0, 0, 0};
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_LOAD, 2 * butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_ADD, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_SUB, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_MUL, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_STORE, 2 * butterflyCount, modulus.GetMSB(), dimensions);
+#endif
     for (uint32_t m{1}, t{n}, logt{GetMSB(t)}; m < n; m <<= 1, t >>= 1, --logt) {
         for (uint32_t i{0}; i < m; ++i) {
             auto omega{rootOfUnityTable[i + m]};
             auto preconOmega{preconRootOfUnityTable[i + m]};
             for (uint32_t j1{i << logt}, j2{j1 + t}; j1 < j2; ++j1) {
                 auto omegaFactor{(*element)[j1 + t]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
                 omegaFactor.ModMulFastConstEq(omega, modulus, preconOmega);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_MUL, modulus.GetMSB());
+#endif
                 auto loVal{(*element)[j1 + 0]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
 #if defined(__GNUC__) && !defined(__clang__)
                 auto hiVal{loVal + omegaFactor};
                 if (hiVal >= modulus)
                     hiVal -= modulus;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_ADD, modulus.GetMSB());
+#endif
                 if (loVal < omegaFactor)
                     loVal += modulus;
                 loVal -= omegaFactor;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_SUB, modulus.GetMSB());
+                PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+#endif
                 (*element)[j1 + 0] = hiVal;
                 (*element)[j1 + t] = loVal;
 #else
@@ -350,17 +386,34 @@ void NumberTheoreticTransformNat<VecType>::ForwardTransformToBitReverseInPlace(c
     // peeled off last ntt stage for performance
     for (uint32_t i{0}; i < (n << 1); i += 2) {
         auto omegaFactor{(*element)[i + 1]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
         auto omega{rootOfUnityTable[(i >> 1) + n]};
         auto preconOmega{preconRootOfUnityTable[(i >> 1) + n]};
         omegaFactor.ModMulFastConstEq(omega, modulus, preconOmega);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_MUL, modulus.GetMSB());
+#endif
         auto loVal{(*element)[i + 0]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
 #if defined(__GNUC__) && !defined(__clang__)
         auto hiVal{loVal + omegaFactor};
         if (hiVal >= modulus)
             hiVal -= modulus;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_ADD, modulus.GetMSB());
+#endif
         if (loVal < omegaFactor)
             loVal += modulus;
         loVal -= omegaFactor;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_SUB, modulus.GetMSB());
+        PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+#endif
         (*element)[i + 0] = hiVal;
         (*element)[i + 1] = loVal;
 #else
@@ -511,6 +564,10 @@ template <typename VecType>
 void NumberTheoreticTransformNat<VecType>::InverseTransformFromBitReverseInPlace(
     const VecType& rootOfUnityInverseTable, const VecType& preconRootOfUnityInverseTable, const IntType& cycloOrderInv,
     const IntType& preconCycloOrderInv, VecType* element) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    ScopedPBSFaultTransform transformScope(PBSFaultTransform::INTT);
+    ScopedPBSFaultInjection faultScope(PBSFaultTransform::INTT);
+#endif
     //
     // INTT based on the Gentleman-Sande (GS) butterfly
     // Inputs: element (vector of size n in bit-reversed ordering)
@@ -532,6 +589,15 @@ void NumberTheoreticTransformNat<VecType>::InverseTransformFromBitReverseInPlace
 
     auto modulus{element->GetModulus()};
     uint32_t n(element->GetLength());
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    const auto butterflyCount = (static_cast<uint64_t>(n) / 2) * GetMSB(n);
+    const auto dimensions = std::array<uint32_t, 4>{n, 0, 0, 0};
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_LOAD, 2 * butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_ADD, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_SUB, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_MUL, butterflyCount, modulus.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::BUTTERFLY_STORE, 2 * butterflyCount, modulus.GetMSB(), dimensions);
+#endif
 
     // precomputed omega[bitreversed(1)] * (n inverse). used in final stage of intt.
     auto omega1Inv{rootOfUnityInverseTable[1].ModMulFastConst(cycloOrderInv, modulus, preconCycloOrderInv)};
@@ -544,15 +610,30 @@ void NumberTheoreticTransformNat<VecType>::InverseTransformFromBitReverseInPlace
             auto preconOmega{preconRootOfUnityInverseTable[(i + n) >> 1]};
             auto loVal{(*element)[i + 0]};
             auto hiVal{(*element)[i + 1]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+            PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
 #if defined(__GNUC__) && !defined(__clang__)
             auto omegaFactor{loVal};
             if (omegaFactor < hiVal)
                 omegaFactor += modulus;
             omegaFactor -= hiVal;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_SUB, modulus.GetMSB());
+#endif
             loVal += hiVal;
             if (loVal >= modulus)
                 loVal -= modulus;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_ADD, modulus.GetMSB());
+#endif
             omegaFactor.ModMulFastConstEq(omega, modulus, preconOmega);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_MUL, modulus.GetMSB());
+            PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+            PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+#endif
             (*element)[i + 0] = loVal;
             (*element)[i + 1] = omegaFactor;
 #else
@@ -572,15 +653,30 @@ void NumberTheoreticTransformNat<VecType>::InverseTransformFromBitReverseInPlace
             for (uint32_t j1{i << logt}, j2{j1 + t}; j1 < j2; ++j1) {
                 auto loVal{(*element)[j1 + 0]};
                 auto hiVal{(*element)[j1 + t]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+                PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
 #if defined(__GNUC__) && !defined(__clang__)
                 auto omegaFactor{loVal};
                 if (omegaFactor < hiVal)
                     omegaFactor += modulus;
                 omegaFactor -= hiVal;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_SUB, modulus.GetMSB());
+#endif
                 loVal += hiVal;
                 if (loVal >= modulus)
                     loVal -= modulus;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_ADD, modulus.GetMSB());
+#endif
                 omegaFactor.ModMulFastConstEq(omega, modulus, preconOmega);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+                PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_MUL, modulus.GetMSB());
+                PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+                PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+#endif
                 (*element)[j1 + 0] = loVal;
                 (*element)[j1 + t] = omegaFactor;
 #else
@@ -600,15 +696,30 @@ void NumberTheoreticTransformNat<VecType>::InverseTransformFromBitReverseInPlace
     for (uint32_t j1{0}; j1 < j2; ++j1) {
         auto loVal{(*element)[j1]};
         auto hiVal{(*element)[j1 + j2]};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+        PBSFaultInjection::Inject(hiVal, PBSFaultSite::BUTTERFLY_LOAD, modulus.GetMSB());
+#endif
 #if defined(__GNUC__) && !defined(__clang__)
         auto omegaFactor{loVal};
         if (omegaFactor < hiVal)
             omegaFactor += modulus;
         omegaFactor -= hiVal;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_SUB, modulus.GetMSB());
+#endif
         loVal += hiVal;
         if (loVal >= modulus)
             loVal -= modulus;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_ADD, modulus.GetMSB());
+#endif
         omegaFactor.ModMulFastConstEq(omega1Inv, modulus, preconOmega1Inv);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_MUL, modulus.GetMSB());
+        PBSFaultInjection::Inject(loVal, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+        PBSFaultInjection::Inject(omegaFactor, PBSFaultSite::BUTTERFLY_STORE, modulus.GetMSB());
+#endif
         (*element)[j1 + 0]  = loVal;
         (*element)[j1 + j2] = omegaFactor;
 #else

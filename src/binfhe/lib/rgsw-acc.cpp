@@ -46,6 +46,10 @@
 
 #include "lattice/lat-hal.h"
 #include "rgsw-acc.h"
+#include <type_traits>
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+#include "utils/pbs-sbf-fault-injection.h"
+#endif
 #include <memory>
 #include <vector>
 
@@ -54,6 +58,10 @@ namespace lbcrypto {
 void RingGSWAccumulator::SignedDigitDecompose(const std::shared_ptr<RingGSWCryptoParams>& params,
                                               const std::vector<NativePoly>& input,
                                               std::vector<NativePoly>& output) const {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    ScopedPBSFaultInjection faultScope({PBSFaultSite::DECOMPOSE_DIGIT_EXTRACTION,
+                                        PBSFaultSite::DECOMPOSE_INTERMEDIATE_DIGIT});
+#endif
     auto QHalf{params->GetQ().ConvertToInt<BasicInteger>() >> 1};
     auto Q_int{params->GetQ().ConvertToInt<NativeInteger::SignedNativeInt>()};
     auto gBits{static_cast<NativeInteger::SignedNativeInt>(__builtin_ctz(params->GetBaseG()))};
@@ -61,6 +69,14 @@ void RingGSWAccumulator::SignedDigitDecompose(const std::shared_ptr<RingGSWCrypt
     // approximate gadget decomposition is used; the first digit is ignored
     uint32_t digitsG2{(params->GetDigitsG() - 1) << 1};
     uint32_t N{params->GetN()};
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    const auto candidateCount = static_cast<uint64_t>(digitsG2) * N;
+    const auto dimensions = std::array<uint32_t, 4>{digitsG2, N, 0, 0};
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::DECOMPOSE_DIGIT_EXTRACTION, candidateCount,
+                                                params->GetQ().GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::DECOMPOSE_INTERMEDIATE_DIGIT, candidateCount,
+                                                params->GetQ().GetMSB(), dimensions);
+#endif
 
     for (uint32_t k{0}; k < N; ++k) {
         auto t0{input[0][k].ConvertToInt<BasicInteger>()};
@@ -79,13 +95,36 @@ void RingGSWAccumulator::SignedDigitDecompose(const std::shared_ptr<RingGSWCrypt
             d0 = (d0 - r0) >> gBits;
             if (r0 < 0)
                 r0 += Q_int;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            // State update intentionally precedes this hook: this is the
+            // agreed non-propagating digit-extraction fault model.
+            using UnsignedNativeInt = std::make_unsigned_t<NativeInteger::SignedNativeInt>;
+            auto rawR0 = static_cast<UnsignedNativeInt>(r0);
+            PBSFaultInjection::InjectRaw(rawR0, PBSFaultSite::DECOMPOSE_DIGIT_EXTRACTION,
+                                         params->GetQ().GetMSB());
+            r0 = static_cast<NativeInteger::SignedNativeInt>(rawR0);
+#endif
             output[d + 0][k] += r0;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(output[d + 0][k], PBSFaultSite::DECOMPOSE_INTERMEDIATE_DIGIT,
+                                       params->GetQ().GetMSB());
+#endif
 
             r1 = (d1 << gBitsMaxBits) >> gBitsMaxBits;
             d1 = (d1 - r1) >> gBits;
             if (r1 < 0)
                 r1 += Q_int;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            auto rawR1 = static_cast<UnsignedNativeInt>(r1);
+            PBSFaultInjection::InjectRaw(rawR1, PBSFaultSite::DECOMPOSE_DIGIT_EXTRACTION,
+                                         params->GetQ().GetMSB());
+            r1 = static_cast<NativeInteger::SignedNativeInt>(rawR1);
+#endif
             output[d + 1][k] += r1;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::Inject(output[d + 1][k], PBSFaultSite::DECOMPOSE_INTERMEDIATE_DIGIT,
+                                       params->GetQ().GetMSB());
+#endif
         }
     }
 }

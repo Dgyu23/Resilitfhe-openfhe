@@ -33,6 +33,9 @@
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
 #include "pbs-operator-breakdown.h"
 #endif
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+#include "utils/pbs-sbf-fault-injection.h"
+#endif
 
 #include <string>
 
@@ -65,6 +68,9 @@ void RingGSWAccumulatorCGGI::EvalAcc(const std::shared_ptr<RingGSWCryptoParams>&
     auto mod{a.GetModulus()};
     auto MbyMod{NativeInteger(2 * params->GetN()) / mod};
     for (size_t i = 0; i < n; ++i) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::NONE, static_cast<uint32_t>(i));
+#endif
         // handles -a*E(1) and handles -a*E(-1) = a*E(1)
         AddToAccCGGI(params, (*ek)[0][0][i], (*ek)[0][1][i], NativeInteger(0).ModSubFast(a[i], mod) * MbyMod, acc);
     }
@@ -105,23 +111,37 @@ RingGSWEvalKey RingGSWAccumulatorCGGI::KeyGenCGGI(const std::shared_ptr<RingGSWC
 void RingGSWAccumulatorCGGI::AddToAccCGGI(const std::shared_ptr<RingGSWCryptoParams>& params, ConstRingGSWEvalKey& ek1,
                                           ConstRingGSWEvalKey& ek2, const NativeInteger& a, RLWECiphertext& acc) const {
     std::vector<NativePoly> ct(acc->GetElements());
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    const uint32_t evalAccIndex = PBSFaultInjection::GetCurrentEvalAcc();
+    PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::INTT, evalAccIndex, 0);
+#endif
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
     {
         ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
         ct[0].SetFormat(Format::COEFFICIENT);
     }
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::INTT, evalAccIndex, 1);
+#endif
     {
         ScopedPBSOperatorBreakdownTimer inttTimer(PBSOperatorBreakdownStage::INTT);
         ct[1].SetFormat(Format::COEFFICIENT);
     }
 #else
     ct[0].SetFormat(Format::COEFFICIENT);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::INTT, evalAccIndex, 1);
+#endif
     ct[1].SetFormat(Format::COEFFICIENT);
 #endif
 
     // approximate gadget decomposition is used; the first digit is ignored
     uint32_t digitsG2{(params->GetDigitsG() - 1) << 1};
     std::vector<NativePoly> dct(digitsG2, NativePoly(params->GetPolyParams(), Format::COEFFICIENT, true));
+
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::DECOMPOSE, evalAccIndex);
+#endif
 
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
     {
@@ -135,12 +155,56 @@ void RingGSWAccumulatorCGGI::AddToAccCGGI(const std::shared_ptr<RingGSWCryptoPar
 #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(digitsG2))
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
     for (uint32_t i = 0; i < digitsG2; ++i) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::NTT, evalAccIndex, i);
+#endif
         ScopedPBSOperatorBreakdownTimer nttTimer(PBSOperatorBreakdownStage::NTT);
         dct[i].SetFormat(Format::EVALUATION);
     }
 #else
-    for (uint32_t i = 0; i < digitsG2; ++i)
+    for (uint32_t i = 0; i < digitsG2; ++i) {
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::NTT, evalAccIndex, i);
+#endif
         dct[i].SetFormat(Format::EVALUATION);
+    }
+#endif
+
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    PBSFaultInjection::SetCurrentBlock(PBSFaultBlockKind::VCMM, evalAccIndex);
+    // One compact block per site per AddToAcc invocation.  This is used only
+    // by pre-exploration and avoids coefficient-level discovery hooks.
+    const auto coeffCount = static_cast<uint64_t>(dct.front().GetLength());
+    const auto bitWidth = dct.front().GetModulus().GetMSB();
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::VCMM_INPUT, digitsG2 * coeffCount, bitWidth,
+                                                {digitsG2, static_cast<uint32_t>(coeffCount), 0, 0});
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::VCMM_MULTIPLICATION, 4 * coeffCount, bitWidth,
+                                                {4, static_cast<uint32_t>(coeffCount), 0, 0});
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::VCMM_ACCUMULATION,
+                                                4 * static_cast<uint64_t>(digitsG2 - 1) * coeffCount, bitWidth,
+                                                {4, digitsG2 - 1, static_cast<uint32_t>(coeffCount), 0});
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::VCMM_OUTPUT, 4 * coeffCount, bitWidth,
+                                                {4, static_cast<uint32_t>(coeffCount), 0, 0});
+
+    // INPUT is a shared dct-buffer fault before any of the four VCMM branches.
+    if (PBSFaultInjection::IsSiteSelected(PBSFaultSite::VCMM_INPUT)) {
+        ScopedPBSFaultInjection faultScope(PBSFaultSite::VCMM_INPUT);
+        for (uint32_t digit = 0; digit < dct.size(); ++digit) {
+            auto& poly = dct[digit];
+            for (uint32_t k = 0; k < poly.GetLength(); ++k)
+                PBSFaultInjection::Inject(poly[k], PBSFaultSite::VCMM_INPUT, poly.GetModulus().GetMSB());
+        }
+    }
+
+    // A non-selected VCMM site must add no coefficient-level work.  The scope
+    // is narrow so NTT/INTT executed by polynomial arithmetic stay inactive.
+    const auto injectVCMM = [](NativePoly& poly, PBSFaultSite site, uint32_t, uint32_t) {
+        if (!PBSFaultInjection::IsSiteSelected(site))
+            return;
+        ScopedPBSFaultInjection faultScope(site);
+        for (uint32_t k = 0; k < poly.GetLength(); ++k)
+            PBSFaultInjection::Inject(poly[k], site, poly.GetModulus().GetMSB());
+    };
 #endif
 
     // obtain both monomial(index) for sk = 1 and monomial(-index) for sk = -1
@@ -162,23 +226,70 @@ void RingGSWAccumulatorCGGI::AddToAccCGGI(const std::shared_ptr<RingGSWCryptoPar
     ScopedPBSOperatorBreakdownTimer vcmmTimer(PBSOperatorBreakdownStage::VCMM);
 #endif
     NativePoly tmp(dct[0] * ev1[0][0]);
-    for (uint32_t i = 1; i < digitsG2; ++i)
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_MULTIPLICATION, 0, 0);
+#endif
+    for (uint32_t i = 1; i < digitsG2; ++i) {
         tmp += (dct[i] * ev1[i][0]);
-    acc->GetElements()[0] += (tmp *= monomial);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        injectVCMM(tmp, PBSFaultSite::VCMM_ACCUMULATION, 0, i);
+#endif
+    }
+    tmp *= monomial;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_OUTPUT, 0, 0);
+#endif
+    acc->GetElements()[0] += tmp;
     tmp = (dct[0] * ev1[0][1]);
-    for (uint32_t i = 1; i < digitsG2; ++i)
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_MULTIPLICATION, 1, 0);
+#endif
+    for (uint32_t i = 1; i < digitsG2; ++i) {
         tmp += (dct[i] * ev1[i][1]);
-    acc->GetElements()[1] += (tmp *= monomial);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        injectVCMM(tmp, PBSFaultSite::VCMM_ACCUMULATION, 1, i);
+#endif
+    }
+    tmp *= monomial;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_OUTPUT, 1, 0);
+#endif
+    acc->GetElements()[1] += tmp;
 
     const std::vector<std::vector<NativePoly>>& ev2(ek2->GetElements());
     tmp = (dct[0] * ev2[0][0]);
-    for (uint32_t i = 1; i < digitsG2; ++i)
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_MULTIPLICATION, 2, 0);
+#endif
+    for (uint32_t i = 1; i < digitsG2; ++i) {
         tmp += (dct[i] * ev2[i][0]);
-    acc->GetElements()[0] += (tmp *= monomialNeg);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        injectVCMM(tmp, PBSFaultSite::VCMM_ACCUMULATION, 2, i);
+#endif
+    }
+    tmp *= monomialNeg;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_OUTPUT, 2, 0);
+#endif
+    acc->GetElements()[0] += tmp;
     tmp = (dct[0] * ev2[0][1]);
-    for (uint32_t i = 1; i < digitsG2; ++i)
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_MULTIPLICATION, 3, 0);
+#endif
+    for (uint32_t i = 1; i < digitsG2; ++i) {
         tmp += (dct[i] *= ev2[i][1]);
-    acc->GetElements()[1] += (tmp *= monomialNeg);
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+        injectVCMM(tmp, PBSFaultSite::VCMM_ACCUMULATION, 3, i);
+#endif
+    }
+    tmp *= monomialNeg;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    injectVCMM(tmp, PBSFaultSite::VCMM_OUTPUT, 3, 0);
+#endif
+    acc->GetElements()[1] += tmp;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    PBSFaultInjection::ClearCurrentBlock();
+#endif
 }
 
 };  // namespace lbcrypto

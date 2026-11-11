@@ -33,6 +33,9 @@
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
 #include "pbs-operator-breakdown.h"
 #endif
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+#include "utils/pbs-sbf-fault-injection.h"
+#endif
 
 #include "math/binaryuniformgenerator.h"
 #include "math/discreteuniformgenerator.h"
@@ -353,11 +356,25 @@ LWECiphertext LWEEncryptionScheme::KeySwitch(const std::shared_ptr<LWECryptoPara
 #if defined(WITH_PBS_OPERATOR_BREAKDOWN)
     ScopedPBSOperatorBreakdownTimer keySwitchTimer(PBSOperatorBreakdownStage::KEYSWITCH);
 #endif
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    ScopedPBSFaultInjection faultScope({PBSFaultSite::KEYSWITCH_KEY_LOOKUP,
+                                        PBSFaultSite::KEYSWITCH_ACCUMULATION,
+                                        PBSFaultSite::KEYSWITCH_UPDATE});
+#endif
     const size_t n(params->Getn());
     const size_t N(params->GetN());
     NativeInteger Q(params->GetqKS());
     NativeInteger::Integer baseKS(params->GetBaseKS());
     const auto digitCount = static_cast<size_t>(std::ceil(log(Q.ConvertToDouble()) / log(static_cast<double>(baseKS))));
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+    const auto updateCount = static_cast<uint64_t>(N) * digitCount;
+    const auto vectorCount = updateCount * (n + 1);
+    const auto dimensions = std::array<uint32_t, 4>{static_cast<uint32_t>(N), static_cast<uint32_t>(digitCount),
+                                                    static_cast<uint32_t>(n), 0};
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::KEYSWITCH_UPDATE, updateCount, Q.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::KEYSWITCH_KEY_LOOKUP, vectorCount, Q.GetMSB(), dimensions);
+    PBSFaultInjection::RegisterPreExploreBlock(PBSFaultSite::KEYSWITCH_ACCUMULATION, vectorCount, Q.GetMSB(), dimensions);
+#endif
 
     NativeVector a(n, Q);
     NativeInteger b(ctQN->GetB());
@@ -368,10 +385,27 @@ LWECiphertext LWEEncryptionScheme::KeySwitch(const std::shared_ptr<LWECryptoPara
         for (size_t j = 0; j < digitCount; ++j) {
             const auto a0 = (atmp % baseKS);
             atmp /= baseKS;
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            PBSFaultInjection::InjectRaw(atmp, PBSFaultSite::KEYSWITCH_UPDATE, Q.GetMSB());
+#endif
+#if defined(WITH_PBS_SBF_FAULT_INJECTION)
+            auto keyB = refB[a0][j];
+            PBSFaultInjection::Inject(keyB, PBSFaultSite::KEYSWITCH_KEY_LOOKUP, Q.GetMSB());
+            b.ModSubFastEq(keyB, Q);
+            PBSFaultInjection::Inject(b, PBSFaultSite::KEYSWITCH_ACCUMULATION, Q.GetMSB());
+            auto& refAj = refA[a0][j];
+            for (size_t k = 0; k < n; ++k) {
+                auto keyA = refAj[k];
+                PBSFaultInjection::Inject(keyA, PBSFaultSite::KEYSWITCH_KEY_LOOKUP, Q.GetMSB());
+                a[k].ModSubFastEq(keyA, Q);
+                PBSFaultInjection::Inject(a[k], PBSFaultSite::KEYSWITCH_ACCUMULATION, Q.GetMSB());
+            }
+#else
             b.ModSubFastEq(refB[a0][j], Q);
             auto& refAj = refA[a0][j];
             for (size_t k = 0; k < n; ++k)
                 a[k].ModSubFastEq(refAj[k], Q);
+#endif
         }
     }
     return std::make_shared<LWECiphertextImpl>(std::move(a), b);

@@ -79,8 +79,15 @@ option(WITH_COVTEST "Turn on to enable coverage testing"                        
 option(WITH_NOISE_DEBUG "Use only when running lattice estimator; not for production"  OFF )
 option(WITH_REDUCED_NOISE "Enable reduced noise within HKS and BFV HPSPOVERQ modes"    OFF )
 option(WITH_PBS_OPERATOR_BREAKDOWN "Enable BinFHE PBS operator breakdown instrumentation" OFF )
+option(WITH_PBS_SBF_FAULT_INJECTION "Enable BinFHE PBS single-bit fault-injection experiments" OFF )
 option(USE_MACPORTS "Use MacPorts installed packages"                                  OFF )
 
+# A fault-injection plan has one deterministic dynamic-occurrence stream per
+# benchmark process.  It is intentionally single-threaded; enabling OpenMP
+# would make that stream ambiguous rather than merely slower.
+if(WITH_PBS_SBF_FAULT_INJECTION AND WITH_OPENMP)
+    message(FATAL_ERROR "WITH_PBS_SBF_FAULT_INJECTION requires WITH_OPENMP=OFF")
+endif()
 # Set required number of bits for native integer in build by setting NATIVE_SIZE to 64 or 128
 if(NOT NATIVE_SIZE)
     set(NATIVE_SIZE 64)
@@ -110,6 +117,7 @@ message(STATUS "WITH_COVTEST:       ${WITH_COVTEST}")
 message(STATUS "WITH_NOISE_DEBUG:   ${WITH_NOISE_DEBUG}")
 message(STATUS "WITH_REDUCED_NOISE: ${WITH_REDUCED_NOISE}")
 message(STATUS "WITH_PBS_OPERATOR_BREAKDOWN: ${WITH_PBS_OPERATOR_BREAKDOWN}")
+message(STATUS "WITH_PBS_SBF_FAULT_INJECTION: ${WITH_PBS_SBF_FAULT_INJECTION}")
 message(STATUS "USE_MACPORTS:       ${USE_MACPORTS}")
 
 #--------------------------------------------------------------------
