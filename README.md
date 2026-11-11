@@ -36,3 +36,24 @@ scripts/evaluation_pbs_operator_breakdown.sh \
 ```
 
 This evaluation runs PBS across the predefined parameter configurations and records the operator-level timing breakdown. Inspect `results/pbs-operator-breakdown/summary.log` to verify that `NTT`, `INTT`, `VCMM`, `KeySwitch`, and `Decompose` collectively dominate the PBS execution time.
+
+### PBS Operator Fault Injection
+
+Run the following commands to build and execute the PBS operator fault-injection evaluation:
+
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_EXAMPLES=ON \
+  -DWITH_PBS_SBF_FAULT_INJECTION=ON
+
+cmake --build build-release --target evaluation-pbs-operator-fault-injection -j
+
+chmod +x scripts/evaluation-pbs-operator-fault-injection.sh
+
+scripts/evaluation-pbs-operator-fault-injection.sh \
+  build-release/bin/examples/binfhe/evaluation-pbs-operator-fault-injection \
+  results/pbs-operator-fault-injection
+```
+
+This evaluation injects transient single-bit-flip faults into the five PBS operators across the predefined parameter configurations and reports the decryption error rate (DER) in `results/pbs-operator-fault-injection/summary.log`. All five operators have non-negligible DER; `VCMM` and `NTT` are the most error-sensitive, with DER close to \(1 - 1/p\), where \(p\) denotes the plaintext modulus.
