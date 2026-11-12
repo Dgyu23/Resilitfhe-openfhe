@@ -57,3 +57,25 @@ scripts/evaluation-pbs-operator-fault-injection.sh \
 ```
 
 This evaluation injects transient single-bit-flip faults into the five PBS operators across the predefined parameter configurations and reports the decryption error rate (DER) in `results/pbs-operator-fault-injection/summary.log`. All five operators have non-negligible DER; `VCMM` and `NTT` are the most error-sensitive, with DER close to \(1 - 1/p\), where \(p\) denotes the plaintext modulus.
+
+### PBS Operator Protection
+
+Run the following commands to build and execute the PBS operator-protection evaluation:
+
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_EXAMPLES=ON
+
+cmake --build build-release --target evaluation-operator-protection -j
+
+chmod +x scripts/evaluation-operator-protection.sh
+
+scripts/evaluation-operator-protection.sh ntt
+scripts/evaluation-operator-protection.sh intt
+scripts/evaluation-operator-protection.sh vcmm
+scripts/evaluation-operator-protection.sh decompose
+scripts/evaluation-operator-protection.sh keyswitch
+```
+
+This evaluation details the execution latency and protection overhead of the five performance-critical PBS operators—NTT, INTT, VCMM, Decompose, and KeySwitch—which collectively account for most PBS execution time, across four schemes: the unprotected baseline, DMR, Naive ABFT, and ResiliTFHE. It validates our scheme's protection-overhead optimization relative to DMR and Naive ABFT.
