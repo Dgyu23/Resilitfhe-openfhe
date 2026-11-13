@@ -7,30 +7,27 @@ set -euo pipefail
 # invocation and the relative overhead of every protected method.
 #
 # Usage:
-#   scripts/evaluation-operator-protection.sh [operation] [warmup] [measure]
+#   scripts/evaluation-operator-protection.sh <benchmark> <result-directory> \
+#       <operation> [warmup] [measure] [parallel]
 #
 # Positional arguments:
-#   operation: operator to benchmark: ntt, intt, decompose, keyswitch, or
-#       vcmm (default: ntt).
+#   benchmark: evaluation-operator-protection executable.
+#   result-directory: root directory for this experiment's results.
+#   operation: operator to benchmark: ntt, intt, decompose, keyswitch, or vcmm.
 #   warmup: invocations of every method before timing. Warmups are excluded
 #       from the reported time and reduce cache and runtime initialization
 #       effects (default: 10000; keyswitch default: 100).
 #   measure: timed invocations of every method. The benchmark divides each
 #       method's aggregate timing by this value (default: 100000; keyswitch
 #       default: 5000).
+#   parallel: maximum concurrent security-level processes (default: 1).
 #
 # For each security level, the script writes the benchmark output to
-# results/operator-protection/<OPERATOR>/<operation>-<security>.log.  The
-# corresponding summary.log has one CSV row per method, with No-Protection as
-# the overhead baseline. progress.log records start, completion, and output
-# locations. A later invocation for the same operator replaces these files.
+# <result-directory>/<OPERATOR>/<operation>-<security>.log.  The corresponding
+# summary.log has one CSV row per method, with No-Protection as the overhead
+# baseline. progress.log records start, completion, and output locations. A
+# later invocation for the same operator replaces these files.
 #
-# Environment overrides:
-#   EVALUATION_OPERATOR_PROTECTION_BIN: path to the benchmark executable
-#       (default: build-release/bin/examples/binfhe/evaluation-operator-protection).
-#   EVALUATION_OPERATOR_PROTECTION_DIR: root directory for operator results
-#       (default: results/operator-protection).
-
 validate_nonnegative_integer() {
     local name=$1
     local value=$2
@@ -48,25 +45,29 @@ validate_positive_integer() {
     fi
 }
 
-operation=${1:-ntt}
+if [[ $# -lt 3 || $# -gt 6 ]]; then
+    echo "usage: $0 <benchmark> <result-directory> <ntt|intt|decompose|keyswitch|vcmm> [warmup] [measure] [parallel]" >&2
+    exit 2
+fi
+
+benchmark=$1
+result_root=$2
+operation=$3
 if [[ $operation != ntt && $operation != intt && $operation != decompose && $operation != keyswitch && $operation != vcmm ]]; then
     echo "operation must be ntt, intt, decompose, keyswitch, or vcmm: $operation" >&2
     exit 2
 fi
 if [[ $operation == keyswitch ]]; then
-    warmup=${2:-100}
-    measure=${3:-5000}
+    warmup=${4:-100}
+    measure=${5:-5000}
 else
-    warmup=${2:-10000}
-    measure=${3:-100000}
+    warmup=${4:-10000}
+    measure=${5:-100000}
 fi
+parallel=${6:-1}
 validate_nonnegative_integer "warmup" "$warmup"
 validate_positive_integer "measure" "$measure"
-
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-repo_root=$(cd -- "$script_dir/.." && pwd)
-benchmark=${EVALUATION_OPERATOR_PROTECTION_BIN:-"$repo_root/build-release/bin/examples/binfhe/evaluation-operator-protection"}
-result_root=${EVALUATION_OPERATOR_PROTECTION_DIR:-"$repo_root/results/operator-protection"}
+validate_positive_integer "parallel" "$parallel"
 operator_label=${operation^^}
 summary_operator=$operator_label
 if [[ $operation == decompose || $operation == keyswitch || $operation == vcmm ]]; then
@@ -84,8 +85,8 @@ mkdir -p "$result_dir"
 summary_log="$result_dir/summary.log"
 progress_log="$result_dir/progress.log"
 printf 'Operator,Method,Params,Time,ProtectionOverhead(%%)\n' > "$summary_log"
-printf 'start=%s warmup=%s measure=%s benchmark=%s\n' \
-    "$(date --iso-8601=seconds)" "$warmup" "$measure" "$benchmark" > "$progress_log"
+printf 'start=%s warmup=%s measure=%s parallel=%s benchmark=%s\n' \
+    "$(date --iso-8601=seconds)" "$warmup" "$measure" "$parallel" "$benchmark" > "$progress_log"
 
 # Extract exactly one method's benchmark-reported average from a per-security
 # log. The executable emits the value in nanoseconds.
@@ -148,8 +149,40 @@ else
     methods=("No-Protection" "DMR" "Naive-ABFT" "Ours")
 fi
 
+running_jobs=0
+failed_jobs=0
+wait_for_one() {
+    local status=0
+    if wait -n; then
+        :
+    else
+        status=$?
+        failed_jobs=$((failed_jobs + 1))
+        printf '%s TASK_FAILED exit_status=%s failed_jobs=%s\n' \
+            "$(date --iso-8601=seconds)" "$status" "$failed_jobs" >> "$progress_log"
+    fi
+    running_jobs=$((running_jobs - 1))
+}
+
+# The per-security logs are disjoint.  Run them concurrently when requested,
+# then parse them only after all benchmark processes have completed.
 for security in STD128 STD192 STD256; do
-    run_security "$security"
+    run_security "$security" &
+    running_jobs=$((running_jobs + 1))
+    if ((running_jobs >= parallel)); then
+        wait_for_one
+    fi
+done
+while ((running_jobs > 0)); do
+    wait_for_one
+done
+if ((failed_jobs > 0)); then
+    printf 'finish=%s status=failed failed_jobs=%s summary_not_updated=%s\n' \
+        "$(date --iso-8601=seconds)" "$failed_jobs" "$summary_log" >> "$progress_log"
+    exit 1
+fi
+
+for security in STD128 STD192 STD256; do
     log="$result_dir/${operation}-${security}.log"
     baseline_time=$(extract_average_time_ns "$log" "No-Protection")
     printf '%s,No-Protection,%s,%s,-\n' "$summary_operator" "$security" "$baseline_time" >> "$summary_log"

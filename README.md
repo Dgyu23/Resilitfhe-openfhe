@@ -71,11 +71,11 @@ cmake --build build-release --target evaluation-operator-protection -j
 
 chmod +x scripts/evaluation-operator-protection.sh
 
-scripts/evaluation-operator-protection.sh ntt
-scripts/evaluation-operator-protection.sh intt
-scripts/evaluation-operator-protection.sh vcmm
-scripts/evaluation-operator-protection.sh decompose
-scripts/evaluation-operator-protection.sh keyswitch
+scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/evaluation-operator-protection results/operator-protection ntt
+scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/evaluation-operator-protection results/operator-protection intt
+scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/evaluation-operator-protection results/operator-protection vcmm
+scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/evaluation-operator-protection results/operator-protection decompose
+scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/evaluation-operator-protection results/operator-protection keyswitch
 ```
 
 This evaluation details the execution latency and protection overhead of the five performance-critical PBS operators—NTT, INTT, VCMM, Decompose, and KeySwitch—which collectively account for most PBS execution time, across four schemes: the unprotected baseline, DMR, Naive ABFT, and ResiliTFHE. It validates our scheme's protection-overhead optimization relative to DMR and Naive ABFT.

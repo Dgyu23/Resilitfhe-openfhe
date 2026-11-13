@@ -904,6 +904,9 @@ Result KeySwitchDMR(const std::shared_ptr<LWECryptoParams>& params, const LWESwi
 
 // Fused KeySwitch ABFT. C_in consumes trusted, precomputed key-entry
 // checksums in the original i/j order; C_out consumes the final (a,b).
+// The radix-state update is locally duplicated: an error in atmp would
+// otherwise select the same wrong key entry for both the core and C_in, and
+// therefore evade the end-to-end checksum comparison.
 Result KeySwitchABFT(const std::shared_ptr<LWECryptoParams>& params, const LWESwitchingKey& key,
                      const LWECiphertext& input, const ABFTPrecomp& pre) {
     const uint32_t n = params->Getn();
@@ -915,6 +918,7 @@ Result KeySwitchABFT(const std::shared_ptr<LWECryptoParams>& params, const LWESw
     NativeInteger b(input->GetB());
     NativeInteger cin(input->GetB());
     cin.ModMulFastConstEq(pre.beta, q, pre.betaPrecon);
+    bool updateMismatch = false;
 
     for (uint32_t i = 0; i < N; ++i) {
         const auto& refA = key->GetElementsA()[i];
@@ -922,7 +926,10 @@ Result KeySwitchABFT(const std::shared_ptr<LWECryptoParams>& params, const LWESw
         NativeInteger::Integer atmp(input->GetA(i).ConvertToInt());
         for (uint32_t j = 0; j < digits; ++j) {
             const uint32_t digit = static_cast<uint32_t>(atmp % base);
+            NativeInteger::Integer atmpReplica(atmp);
             atmp /= base;
+            atmpReplica /= base;
+            updateMismatch |= atmp != atmpReplica;
             cin.ModSubFastEq(pre.chi[i][digit][j], q);
             b.ModSubFastEq(refB[digit][j], q);
             const auto& selectedA = refA[digit][j];
@@ -938,7 +945,7 @@ Result KeySwitchABFT(const std::shared_ptr<LWECryptoParams>& params, const LWESw
         term.ModMulFastConstEq(pre.weights[k], q, pre.weightPrecon[k]);
         cout.ModAddFastEq(term, q);
     }
-    return {std::make_shared<LWECiphertextImpl>(std::move(a), b), cin != cout};
+    return {std::make_shared<LWECiphertextImpl>(std::move(a), b), updateMismatch || cin != cout};
 }
 
 template <typename Transform>
