@@ -79,3 +79,25 @@ scripts/evaluation-operator-protection.sh build-release/bin/examples/binfhe/eval
 ```
 
 This evaluation details the execution latency and protection overhead of the five performance-critical PBS operators—NTT, INTT, VCMM, Decompose, and KeySwitch—which collectively account for most PBS execution time, across four schemes: the unprotected baseline, DMR, Naive ABFT, and ResiliTFHE. It validates our scheme's protection-overhead optimization relative to DMR and Naive ABFT.
+
+### Protected Operator Fault-Detection Reliability
+
+Run the following commands to build and execute the operator-level fault-detection evaluation:
+
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_EXAMPLES=ON
+
+cmake --build build-release --target evaluation-operator-reliability -j
+
+chmod +x scripts/evaluation-operator-reliability.sh
+
+scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/evaluation-operator-reliability results/operator-reliability ntt
+scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/evaluation-operator-reliability results/operator-reliability intt
+scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/evaluation-operator-reliability results/operator-reliability vcmm
+scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/evaluation-operator-reliability results/operator-reliability decompose
+scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/evaluation-operator-reliability results/operator-reliability keyswitch
+```
+
+This evaluation injects transient single-bit-flip faults into the protected NTT, INTT, VCMM, Decompose, and KeySwitch implementations. For each selected operator, the script automatically evaluates every current fault site, STD128/STD192/STD256, and both single-fault (1F) and two-fault (2F) injections; in 2F experiments, the two faults target distinct dynamic occurrences of the same site during one invocation. The resulting `results/operator-reliability/<OPERATOR>/summary.csv` reports detected, undetected, and masked samples, together with detection and masking rates. A masked sample has no alarm and exactly matches the fault-free output, so it records a fault that did not affect the operator result rather than an undetected erroneous output.
