@@ -28,9 +28,9 @@ cmake -S . -B build-release \
 
 cmake --build build-release --target evaluation-pbs-operator-breakdown -j
 
-chmod +x scripts/evaluation_pbs_operator_breakdown.sh
+chmod +x scripts/evaluation-pbs-operator-breakdown.sh
 
-scripts/evaluation_pbs_operator_breakdown.sh \
+scripts/evaluation-pbs-operator-breakdown.sh \
   build-release/bin/examples/binfhe/evaluation-pbs-operator-breakdown \
   results/pbs-operator-breakdown
 ```
@@ -101,3 +101,24 @@ scripts/evaluation-operator-reliability.sh build-release/bin/examples/binfhe/eva
 ```
 
 This evaluation injects transient single-bit-flip faults into the protected NTT, INTT, VCMM, Decompose, and KeySwitch implementations. For each selected operator, the script automatically evaluates every current fault site, STD128/STD192/STD256, and both single-fault (1F) and two-fault (2F) injections; in 2F experiments, the two faults target distinct dynamic occurrences of the same site during one invocation. The resulting `results/operator-reliability/<OPERATOR>/summary.csv` reports detected, undetected, and masked samples, together with detection and masking rates. A masked sample has no alarm and exactly matches the fault-free output, so it records a fault that did not affect the operator result rather than an undetected erroneous output.
+
+### Operator-Level Full Protection
+
+Run the following commands to build and execute the end-to-end PBS full-protection evaluation:
+
+```bash
+cmake -S . -B build-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_EXAMPLES=ON \
+  -DWITH_PBS_OPERATOR_BREAKDOWN=ON
+
+cmake --build build-release --target evaluation-pbs-operator-full-protection -j
+
+chmod +x scripts/evaluation-pbs-operator-full-protection.sh
+
+scripts/evaluation-pbs-operator-full-protection.sh \
+  build-release/bin/examples/binfhe/evaluation-pbs-operator-full-protection \
+  results/pbs-operator-full-protection
+```
+
+This evaluation compares OpenFHE's native PBS implementation (`No-Protection-PBS`) with `Full-Protection-PBS` for complete TFHE PBS. NTT, INTT, VCMM, Decompose, and KeySwitch use the dedicated optimized detection algorithms; the remaining computations use DMR. The script evaluates STD128, STD192, and STD256, and stores each configuration's trial logs and averaged `summary.csv` in `results/pbs-operator-full-protection/<SECURITY>/`. This evaluation measures the protection overhead introduced when ResiliTFHE's complete operator-level protection is integrated into end-to-end PBS.
