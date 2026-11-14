@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage:
-#   scripts/evaluation_pbs_operator_breakdown.sh <benchmark> <result-directory> \
+#   scripts/evaluation-pbs-operator-breakdown.sh <benchmark> <result-directory> \
 #       [trials] [warmups] [iterations] [inter-trial-seconds]
 #
 # Positional arguments:
